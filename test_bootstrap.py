@@ -1,94 +1,117 @@
-"""Student A's tests, plus a proposed shared integration test.
+"""Student B's tests for bootstrap_sample.
 
-Team assumptions: percentile CI; ordinary least squares with an intercept.
-Discuss these with Student B before adopting this test suite.
+After merging implementations into bootstrap.py, change the import below
+from studio04 to bootstrap.
 """
 
-import unittest
 import numpy as np
+import pytest
 
-from bootstrap import bootstrap_ci, bootstrap_sample, r_squared
-
-
-class TestBootstrapCI(unittest.TestCase):
-    def test_default_95_percent_interval(self):
-        stats = np.arange(101, dtype=float)
-        result = bootstrap_ci(stats)
-        self.assertIsInstance(result, tuple)
-        np.testing.assert_allclose(result, (2.5, 97.5))
-
-    def test_custom_alpha_and_unsorted_input(self):
-        np.testing.assert_allclose(
-            bootstrap_ci(np.array([4., 0., 3., 1., 2.]), alpha=0.5),
-            (1., 3.),
-        )
-
-    def test_constant_and_singleton(self):
-        for stats in (np.array([7.]), np.full(10, 7.)):
-            with self.subTest(stats=stats):
-                np.testing.assert_allclose(bootstrap_ci(stats), (7., 7.))
-
-    def test_invalid_alpha(self):
-        for alpha in (-0.1, 0., 1., 1.1, np.nan):
-            with self.subTest(alpha=alpha):
-                with self.assertRaises(ValueError):
-                    bootstrap_ci(np.array([1., 2.]), alpha=alpha)
-
-    def test_empty_input(self):
-        with self.assertRaises(ValueError):
-            bootstrap_ci(np.array([]))
+from studio04 import bootstrap_sample
 
 
-class TestRSquared(unittest.TestCase):
-    def test_perfect_positive_and_negative_relationship(self):
-        x = np.arange(5, dtype=float)
-        for slope in (2., -3.):
-            with self.subTest(slope=slope):
-                self.assertAlmostEqual(
-                    r_squared(np.column_stack((x, 5 + slope * x))), 1.
-                )
+def test_returns_one_statistic_per_replicate():
+    data = np.array([1.0, 2.0, 4.0, 8.0])
 
-    def test_known_nonperfect_fit(self):
-        # OLS with intercept: fitted y = x + 1/3; SSE=2/3, SST=8/3.
-        result = r_squared([[0., 0.], [1., 2.], [2., 2.]])
-        self.assertIsInstance(result, (float, np.floating))
-        self.assertAlmostEqual(result, 0.75)
+    result = bootstrap_sample(data, np.mean, n_bootstrap=25)
 
-    def test_zero_linear_association(self):
-        self.assertAlmostEqual(r_squared([[-1., 1.], [0., 0.], [1., 1.]]), 0.)
-
-    def test_two_distinct_points(self):
-        self.assertAlmostEqual(r_squared([[0., 2.], [1., 4.]]), 1.)
-
-    def test_invalid_shapes(self):
-        for data in ([], [1., 2.], [[1., 2.]], [[1.], [2.]],
-                     [[1., 2., 3.], [4., 5., 6.]], np.zeros((2, 2, 2))):
-            with self.subTest(data=data):
-                with self.assertRaises(ValueError):
-                    r_squared(data)
+    assert isinstance(result, np.ndarray)
+    assert result.shape == (25,)
+    assert np.all(np.isfinite(result))
+    assert np.all((result >= data.min()) & (result <= data.max()))
 
 
-class TestIntegration(unittest.TestCase):
-    def test_bootstrap_r_squared_interval(self):
-        # Reproducible continuous data avoids degenerate tiny samples.
-        state = np.random.get_state()
-        try:
-            np.random.seed(607)
-            rng = np.random.default_rng(607)
-            x = rng.normal(size=100)
-            data = np.column_stack((x, 1 + 2 * x + rng.normal(size=100)))
-            stats = bootstrap_sample(data, r_squared, n_bootstrap=200)
-            self.assertEqual(stats.shape, (200,))
-            self.assertTrue(np.all(np.isfinite(stats)))
-            self.assertTrue(np.all((0 <= stats) & (stats <= 1)))
-            lower, upper = bootstrap_ci(stats)
-            self.assertTrue(0 <= lower <= upper <= 1)
-            np.testing.assert_allclose(
-                (lower, upper), np.quantile(stats, [0.025, 0.975])
-            )
-        finally:
-            np.random.set_state(state)
+def test_default_number_of_replicates():
+    result = bootstrap_sample(np.ones(4), np.mean)
+
+    assert isinstance(result, np.ndarray)
+    assert result.shape == (1000,)
+    np.testing.assert_array_equal(result, np.ones(1000))
 
 
-if __name__ == '__main__':
-    unittest.main()
+def test_constant_data_has_constant_bootstrap_mean():
+    result = bootstrap_sample(np.full(5, 7.0), np.mean, n_bootstrap=20)
+
+    np.testing.assert_array_equal(result, np.full(20, 7.0))
+
+
+def test_single_observation():
+    result = bootstrap_sample(np.array([3.0]), np.mean, n_bootstrap=5)
+
+    np.testing.assert_array_equal(result, np.full(5, 3.0))
+
+
+def test_one_replicate():
+    result = bootstrap_sample(np.ones(4), np.mean, n_bootstrap=1)
+
+    assert isinstance(result, np.ndarray)
+    assert result.shape == (1,)
+    np.testing.assert_array_equal(result, np.array([1.0]))
+
+
+def test_accepts_list_and_uses_supplied_statistic():
+    # A sum of four ones is 4, whereas their mean would be 1.
+    result = bootstrap_sample([1.0, 1.0, 1.0, 1.0], np.sum, n_bootstrap=6)
+
+    np.testing.assert_array_equal(result, np.full(6, 4.0))
+
+
+def test_samples_have_original_size_and_values():
+    data = np.array([2.0, 5.0, 9.0, 12.0])
+    samples = []
+
+    def record_mean(sample):
+        samples.append(np.array(sample, copy=True))
+        return np.mean(sample)
+
+    result = bootstrap_sample(data, record_mean, n_bootstrap=12)
+
+    assert len(samples) == 12
+    for sample in samples:
+        assert sample.shape == data.shape
+        assert np.all(np.isin(sample, data))
+    np.testing.assert_allclose(result, [np.mean(sample) for sample in samples])
+
+
+def test_regression_rows_stay_paired_and_input_is_unchanged():
+    data = np.array([[1.0, 10.0], [2.0, 40.0], [3.0, 90.0]])
+    original = data.copy()
+    samples = []
+
+    def record_y_mean(sample):
+        samples.append(np.array(sample, copy=True))
+        return np.mean(sample[:, 1])
+
+    result = bootstrap_sample(data, record_y_mean, n_bootstrap=15)
+
+    assert len(samples) == 15
+    for sample in samples:
+        assert sample.shape == original.shape
+        for row in sample:
+            assert np.any(np.all(original == row, axis=1))
+    np.testing.assert_allclose(result, [np.mean(s[:, 1]) for s in samples])
+    np.testing.assert_array_equal(data, original)
+
+
+@pytest.mark.parametrize("data", [[], np.array([]), np.empty((0, 2))])
+def test_empty_data_raises_value_error(data):
+    with pytest.raises(ValueError):
+        bootstrap_sample(data, np.mean, n_bootstrap=5)
+
+
+@pytest.mark.parametrize("n_bootstrap", [0, -1, -10])
+def test_nonpositive_replicates_raise_value_error(n_bootstrap):
+    with pytest.raises(ValueError):
+        bootstrap_sample([1.0, 2.0], np.mean, n_bootstrap=n_bootstrap)
+
+
+@pytest.mark.parametrize("compute_stat", [None, 42, "mean"])
+def test_noncallable_statistic_raises_type_error(compute_stat):
+    with pytest.raises(TypeError):
+        bootstrap_sample([1.0, 2.0], compute_stat, n_bootstrap=5)
+
+
+@pytest.mark.parametrize("data", [np.array(1.0), np.ones((2, 2, 2))])
+def test_invalid_dimensions_raise_value_error(data):
+    with pytest.raises(ValueError):
+        bootstrap_sample(data, np.mean, n_bootstrap=5)
