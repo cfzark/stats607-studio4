@@ -1,3 +1,6 @@
+import numpy as np
+
+
 def bootstrap_sample(data, compute_stat, n_bootstrap=1000):
     """
     Generate the bootstrap distribution of a statistic
@@ -31,8 +34,6 @@ def bootstrap_sample(data, compute_stat, n_bootstrap=1000):
     TBA
 
     """
-
-    import numpy as np
 
     if not callable(compute_stat):
         raise TypeError("compute_stat must be callable")

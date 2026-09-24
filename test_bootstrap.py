@@ -1,13 +1,12 @@
 """Student B's tests for bootstrap_sample.
 
-After merging implementations into bootstrap.py, change the import below
-from studio04 to bootstrap.
+Student A tests and the shared integration test follow below.
 """
 
 import numpy as np
 import pytest
 
-from studio04 import bootstrap_sample
+from bootstrap import bootstrap_sample
 
 
 def test_returns_one_statistic_per_replicate():
@@ -115,3 +114,91 @@ def test_noncallable_statistic_raises_type_error(compute_stat):
 def test_invalid_dimensions_raise_value_error(data):
     with pytest.raises(ValueError):
         bootstrap_sample(data, np.mean, n_bootstrap=5)
+
+
+# Student A: tests for bootstrap_ci and r_squared, plus integration.
+# The Student B section above is preserved unchanged.
+from bootstrap import bootstrap_ci, r_squared
+from bootstrap import bootstrap_sample as bootstrap_sample_for_integration
+
+
+@pytest.mark.parametrize(
+    "stats, alpha, expected",
+    [
+        (np.arange(101, dtype=float), 0.05, (2.5, 97.5)),
+        (np.array([4., 0., 3., 1., 2.]), 0.5, (1., 3.)),
+        (np.array([7.]), 0.05, (7., 7.)),
+        (np.full(10, 7.), 0.05, (7., 7.)),
+    ],
+)
+def test_ci_percentile_interval(stats, alpha, expected):
+    result = bootstrap_ci(stats, alpha=alpha)
+    assert isinstance(result, tuple)
+    assert result == pytest.approx(expected)
+
+
+def test_ci_default_is_95_percent_interval():
+    assert bootstrap_ci(np.arange(101, dtype=float)) == pytest.approx((2.5, 97.5))
+
+
+@pytest.mark.parametrize("alpha", [-0.1, 0., 1., 1.1, np.nan])
+def test_ci_invalid_alpha_raises_value_error(alpha):
+    with pytest.raises(ValueError):
+        bootstrap_ci(np.array([1., 2.]), alpha=alpha)
+
+
+def test_ci_empty_input_raises_value_error():
+    with pytest.raises(ValueError):
+        bootstrap_ci(np.array([]))
+
+
+@pytest.mark.parametrize("slope", [2., -3.])
+def test_r_squared_perfect_relationship(slope):
+    x = np.arange(5, dtype=float)
+    assert r_squared(np.column_stack((x, 5 + slope * x))) == pytest.approx(1.)
+
+
+def test_r_squared_known_nonperfect_fit():
+    # OLS with intercept: fitted y = x + 1/3; SSE=2/3, SST=8/3.
+    result = r_squared([[0., 0.], [1., 2.], [2., 2.]])
+    assert isinstance(result, (float, np.floating))
+    assert result == pytest.approx(0.75)
+
+
+def test_r_squared_zero_linear_association():
+    assert r_squared([[-1., 1.], [0., 0.], [1., 1.]]) == pytest.approx(0.)
+
+
+def test_r_squared_two_distinct_points():
+    assert r_squared([[0., 2.], [1., 4.]]) == pytest.approx(1.)
+
+
+@pytest.mark.parametrize(
+    "data",
+    [[], [1., 2.], [[1., 2.]], [[1.], [2.]],
+     [[1., 2., 3.], [4., 5., 6.]], np.zeros((2, 2, 2))],
+)
+def test_r_squared_invalid_shapes_raise_value_error(data):
+    with pytest.raises(ValueError):
+        r_squared(data)
+
+
+def test_integration_bootstrap_r_squared_interval():
+    # Restore random state so this test does not affect other tests.
+    state = np.random.get_state()
+    try:
+        np.random.seed(607)
+        rng = np.random.default_rng(607)
+        x = rng.normal(size=100)
+        data = np.column_stack((x, 1 + 2 * x + rng.normal(size=100)))
+        stats = bootstrap_sample_for_integration(data, r_squared, n_bootstrap=200)
+        assert stats.shape == (200,)
+        assert np.all(np.isfinite(stats))
+        assert np.all((0 <= stats) & (stats <= 1))
+        lower, upper = bootstrap_ci(stats)
+        assert 0 <= lower <= upper <= 1
+        np.testing.assert_allclose(
+            (lower, upper), np.quantile(stats, [0.025, 0.975])
+        )
+    finally:
+        np.random.set_state(state)
