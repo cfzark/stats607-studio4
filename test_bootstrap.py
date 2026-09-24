@@ -6,7 +6,9 @@ Student A tests and the shared integration test follow below.
 import numpy as np
 import pytest
 
-from bootstrap import bootstrap_sample
+from scipy.stats import beta
+
+from bootstrap import bootstrap_ci, bootstrap_sample, r_squared
 
 
 def test_returns_one_statistic_per_replicate():
@@ -117,9 +119,6 @@ def test_invalid_dimensions_raise_value_error(data):
 
 
 # Student A: tests for bootstrap_ci and r_squared, plus integration.
-# The Student B section above is preserved unchanged.
-from bootstrap import bootstrap_ci, r_squared
-from bootstrap import bootstrap_sample as bootstrap_sample_for_integration
 
 
 @pytest.mark.parametrize(
@@ -191,7 +190,7 @@ def test_integration_bootstrap_r_squared_interval():
         rng = np.random.default_rng(607)
         x = rng.normal(size=100)
         data = np.column_stack((x, 1 + 2 * x + rng.normal(size=100)))
-        stats = bootstrap_sample_for_integration(data, r_squared, n_bootstrap=200)
+        stats = bootstrap_sample(data, r_squared, n_bootstrap=200)
         assert stats.shape == (200,)
         assert np.all(np.isfinite(stats))
         assert np.all((0 <= stats) & (stats <= 1))
@@ -202,3 +201,91 @@ def test_integration_bootstrap_r_squared_interval():
         )
     finally:
         np.random.set_state(state)
+
+
+# Shared checks and statistical validation (Bonus).
+@pytest.mark.parametrize("stats", [[np.nan], [np.inf], [[1., 2.]]])
+def test_ci_rejects_nonfinite_or_nonvector_statistics(stats):
+    with pytest.raises(ValueError):
+        bootstrap_ci(stats)
+
+
+@pytest.mark.parametrize("bad", [np.nan, np.inf, -np.inf])
+def test_r_squared_rejects_nonfinite_data(bad):
+    with pytest.raises(ValueError):
+        r_squared([[0., 1.], [1., bad]])
+
+
+@pytest.mark.parametrize(
+    "data, expected",
+    [([[0., 4.], [1., 4.]], 1.), ([[2., 0.], [2., 1.]], 0.)],
+)
+def test_r_squared_documented_constant_conventions(data, expected):
+    assert r_squared(data) == pytest.approx(expected)
+
+
+def test_bootstrap_uses_replacement(monkeypatch):
+    def repeated_indices(a, size, replace):
+        assert a == 3
+        assert size == 3
+        assert replace is True
+        return np.array([2, 2, 0])
+
+    monkeypatch.setattr(np.random, "choice", repeated_indices)
+    result = bootstrap_sample([1., 2., 9.], np.mean, n_bootstrap=2)
+    np.testing.assert_allclose(result, [19 / 3, 19 / 3])
+
+
+def test_r_squared_normal_null_distribution():
+    """Under independent normals, R² ~ Beta(1/2, (n-2)/2).
+
+    This follows by squaring the null Pearson correlation distribution:
+    https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.pearsonr.html
+    The empirical CDF uses a DKW bound with failure probability 1e-6.
+    """
+    rng = np.random.default_rng(60704)
+    n, repetitions = 30, 4000
+    statistics = np.array([
+        r_squared(rng.normal(size=(n, 2))) for _ in range(repetitions)
+    ])
+    probabilities = np.array([0.1, 0.25, 0.5, 0.75, 0.9, 0.975])
+    cutoffs = beta.ppf(probabilities, 0.5, (n - 2) / 2)
+    observed = np.mean(statistics[:, None] <= cutoffs, axis=0)
+    tolerance = np.sqrt(np.log(2 / 1e-6) / (2 * repetitions))
+    np.testing.assert_allclose(observed, probabilities, atol=tolerance, rtol=0)
+
+
+def test_null_centered_bootstrap_approximately_matches_theory():
+    """Check the pairs bootstrap against a Gaussian-null benchmark.
+
+    Remove the sample linear association first: bootstrapping uncentered
+    pairs would preserve its accidental correlation, not impose the null.
+    For this large, nearly Gaussian empirical sample the Beta reference
+    is approximate, not an exact conditional bootstrap law. Allow 0.03
+    CDF approximation error in addition to the Monte Carlo DKW bound.
+    This does not assert percentile-CI coverage at the R²=0 boundary.
+    """
+    rng = np.random.default_rng(60705)
+    n, repetitions = 2000, 4000
+    x, y = rng.normal(size=(2, n))
+    x -= x.mean()
+    y -= y.mean()
+    y -= x * (np.dot(x, y) / np.dot(x, x))
+    data = np.column_stack((x, y))
+    assert r_squared(data) < 1e-20
+
+    state = np.random.get_state()
+    try:
+        np.random.seed(60706)
+        statistics = bootstrap_sample(data, r_squared, repetitions)
+    finally:
+        np.random.set_state(state)
+
+    probabilities = np.array([0.1, 0.25, 0.5, 0.75, 0.9, 0.975])
+    cutoffs = beta.ppf(probabilities, 0.5, (n - 2) / 2)
+    observed = np.mean(statistics[:, None] <= cutoffs, axis=0)
+    mc_tolerance = np.sqrt(np.log(2 / 1e-6) / (2 * repetitions))
+    np.testing.assert_allclose(
+        observed, probabilities, atol=mc_tolerance + 0.03, rtol=0
+    )
+    assert statistics.mean() == pytest.approx(1 / (n - 1), rel=0.2)

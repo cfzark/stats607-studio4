@@ -12,7 +12,7 @@ def bootstrap_sample(data, compute_stat, n_bootstrap=1000):
 
     compute_stat : callable
         function that computes a univariate statistic from data
-    
+
     n_bootstrap : int, default 1000
         number of bootstrap replicates to generate
 
@@ -27,11 +27,12 @@ def bootstrap_sample(data, compute_stat, n_bootstrap=1000):
         If data is empty, n_bootstrap < 1, or data has wrong shape
     TypeError
         If compute_stat is not callable
-    
 
-    Example
-    -------
-    TBA
+
+    Examples
+    --------
+    >>> bootstrap_sample([7., 7., 7.], np.mean, n_bootstrap=3)
+    array([7., 7., 7.])
 
     """
 
@@ -86,11 +87,12 @@ def bootstrap_ci(bootstrap_stats, alpha=0.05):
     -----
     Uses the percentile interval with quantiles alpha / 2 and 1 - alpha / 2.
     Statistics must be a finite, one-dimensional array.
-    
-    Example
-    -------
-    TBA
-    
+
+    Examples
+    --------
+    >>> bootstrap_ci(np.arange(101, dtype=float))
+    (2.5, 97.5)
+
     """
     stats = np.asarray(bootstrap_stats, dtype=float)
     if stats.ndim != 1 or stats.size == 0:
@@ -102,6 +104,7 @@ def bootstrap_ci(bootstrap_stats, alpha=0.05):
 
     lower, upper = np.quantile(stats, [alpha / 2, 1 - alpha / 2])
     return float(lower), float(upper)
+
 
 def r_squared(data):
     """
@@ -127,6 +130,11 @@ def r_squared(data):
     Fits a simple linear regression with an intercept. Values must be finite.
     For constant y, returns 1.0 by convention (the intercept fits y exactly).
     For constant x and nonconstant y, returns 0.0.
+
+    Examples
+    --------
+    >>> round(r_squared([[0., 0.], [1., 2.], [2., 2.]]), 2)
+    0.75
     """
     values = np.asarray(data, dtype=float)
     if values.ndim != 2 or values.shape[1] != 2 or values.shape[0] < 2:
