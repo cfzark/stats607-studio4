@@ -80,14 +80,27 @@ def bootstrap_ci(bootstrap_stats, alpha=0.05):
     ------
     ValueError
         If alpha not in (0, 1) or if bootstrap_stats is empty
+
+    Notes
+    -----
+    Uses the percentile interval with quantiles alpha / 2 and 1 - alpha / 2.
+    Statistics must be a finite, one-dimensional array.
     
     Example
     -------
     TBA
     
     """
+    stats = np.asarray(bootstrap_stats, dtype=float)
+    if stats.ndim != 1 or stats.size == 0:
+        raise ValueError("bootstrap_stats must be a nonempty 1D array")
+    if not np.all(np.isfinite(stats)):
+        raise ValueError("bootstrap_stats must contain only finite values")
+    if not np.isscalar(alpha) or not np.isfinite(alpha) or not 0 < alpha < 1:
+        raise ValueError("alpha must be a finite number between 0 and 1")
 
-    raise NotImplementedError("Student B: implement bootstrap_ci")
+    lower, upper = np.quantile(stats, [alpha / 2, 1 - alpha / 2])
+    return float(lower), float(upper)
 
 def r_squared(data):
     """
@@ -107,5 +120,36 @@ def r_squared(data):
     ------
     ValueError
         If data doesn't have exactly 2 columns or < 2 rows
+
+    Notes
+    -----
+    Fits a simple linear regression with an intercept. Values must be finite.
+    For constant y, returns 1.0 by convention (the intercept fits y exactly).
+    For constant x and nonconstant y, returns 0.0.
     """
-    raise NotImplementedError("Student B: implement r_squared")
+    values = np.asarray(data, dtype=float)
+    if values.ndim != 2 or values.shape[1] != 2 or values.shape[0] < 2:
+        raise ValueError("data must have shape (n, 2) with at least two rows")
+    if not np.all(np.isfinite(values)):
+        raise ValueError("data must contain only finite values")
+
+    x, y = values[:, 0], values[:, 1]
+    if np.all(y == y[0]):
+        return 1.0
+    if np.all(x == x[0]):
+        return 0.0
+
+    # Scaling before centering avoids overflow for large finite observations.
+    x_centered = x / np.max(np.abs(x))
+    y_centered = y / np.max(np.abs(y))
+    x_centered = x_centered - np.mean(x_centered)
+    y_centered = y_centered - np.mean(y_centered)
+    x_centered = x_centered / np.max(np.abs(x_centered))
+    y_centered = y_centered / np.max(np.abs(y_centered))
+
+    # With an intercept
+    correlation = np.dot(x_centered, y_centered) / (
+        np.linalg.norm(x_centered) * np.linalg.norm(y_centered)
+    )
+    return float(np.clip(correlation ** 2, 0.0, 1.0))
+
